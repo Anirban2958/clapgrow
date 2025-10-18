@@ -1146,29 +1146,31 @@ def create_app(test_config: Optional[Dict[str, Any]] = None) -> Flask:
             }), 500
 
     # =========================================================================
-    # ERROR HANDLERS - Handle 404, 405, and 500 errors with JSON for API calls
+    # ERROR HANDLERS - Handle 404, 405, and 500 errors gracefully
     # =========================================================================
 
     @app.errorhandler(404)
     def not_found_error(error):
-        """Handle 404 errors - return JSON for API calls, HTML for web pages"""
+        """Handle 404 errors - return JSON for API calls, simple message for web pages"""
         if request.path.startswith('/api/'):
             return jsonify({"success": False, "error": "Resource not found"}), 404
-        return render_template('404.html'), 404
+        # For favicon and other missing resources, just return a simple 404
+        return jsonify({"error": "Not found"}), 404
 
     @app.errorhandler(405)
     def method_not_allowed_error(error):
-        """Handle 405 errors - return JSON for API calls"""
+        """Handle 405 errors - return JSON"""
         if request.path.startswith('/api/'):
             return jsonify({"success": False, "error": "Method not allowed"}), 405
         return jsonify({"error": "Method not allowed"}), 405
 
     @app.errorhandler(500)
     def internal_error(error):
-        """Handle 500 errors - return JSON for API calls, HTML for web pages"""
+        """Handle 500 errors - return JSON with error details"""
+        app.logger.error(f"Internal server error: {error}")
         if request.path.startswith('/api/'):
             return jsonify({"success": False, "error": "Internal server error"}), 500
-        return render_template('500.html'), 500
+        return jsonify({"error": "Internal server error"}), 500
 
     # Make automation cycle accessible for testing
     setattr(app, "run_automation_cycle", process_automation_cycle)
