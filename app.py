@@ -570,11 +570,16 @@ def create_app(test_config: Optional[Dict[str, Any]] = None) -> Flask:
                 # Convert plain text body to HTML for better formatting
                 html_body = body.replace('\n', '<br>')
                 
+                # Use Resend's verified domain (onboarding@resend.dev)
+                # Custom domains require verification at https://resend.com/domains
+                resend_from = "FollowUp Boss <onboarding@resend.dev>"
+                
                 result = resend.Emails.send({
-                    "from": f"FollowUp Boss <{sender}>",
+                    "from": resend_from,
                     "to": recipient,
                     "subject": subject,
-                    "html": f"<div style='font-family: Arial, sans-serif;'>{html_body}</div>"
+                    "html": f"<div style='font-family: Arial, sans-serif;'>{html_body}</div>",
+                    "reply_to": sender  # User can reply to your Gmail
                 })
                 
                 app.logger.info("Email sent via Resend API to %s (ID: %s)", recipient, result.get('id', 'unknown'))
