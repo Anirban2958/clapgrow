@@ -93,6 +93,7 @@ def create_app(test_config: Optional[Dict[str, Any]] = None) -> Flask:
     app.config.setdefault("SMTP_PASSWORD", os.getenv("SMTP_PASSWORD", "your-app-password"))
     app.config.setdefault("SMTP_FROM_EMAIL", os.getenv("SMTP_FROM_EMAIL", "followup-boss@example.com"))
     app.config.setdefault("SMTP_USE_TLS", os.getenv("SMTP_USE_TLS", "true").lower() == "true")
+    app.config.setdefault("SMTP_USE_SSL", os.getenv("SMTP_USE_SSL", "false").lower() == "true")
     
     # Dry Run Mode: Set to True for testing without sending real notifications
     app.config.setdefault("NOTIFICATION_DRY_RUN", os.getenv("NOTIFICATION_DRY_RUN", "false").lower() == "true")
@@ -539,6 +540,7 @@ def create_app(test_config: Optional[Dict[str, Any]] = None) -> Flask:
     def send_email_notification(recipient: str, subject: str, body: str) -> bool:
         """
         Send an email notification using SMTP (Gmail by default).
+        Supports both TLS (port 587) and SSL (port 465).
         
         Args:
             recipient: Email address to send to
@@ -562,6 +564,7 @@ def create_app(test_config: Optional[Dict[str, Any]] = None) -> Flask:
         username = app.config.get("SMTP_USERNAME")
         password = app.config.get("SMTP_PASSWORD")
         use_tls = bool(app.config.get("SMTP_USE_TLS", True))
+        use_ssl = bool(app.config.get("SMTP_USE_SSL", False))
 
         message = EmailMessage()
         message["From"] = sender
@@ -570,12 +573,19 @@ def create_app(test_config: Optional[Dict[str, Any]] = None) -> Flask:
         message.set_content(body)
 
         try:
-            with smtplib.SMTP(host, port, timeout=10) as smtp:
-                if use_tls:
-                    smtp.starttls()
-                if username and password:
-                    smtp.login(username, password)
-                smtp.send_message(message)
+            # Use SMTP_SSL for port 465, regular SMTP for port 587
+            if use_ssl:
+                with smtplib.SMTP_SSL(host, port, timeout=10) as smtp:
+                    if username and password:
+                        smtp.login(username, password)
+                    smtp.send_message(message)
+            else:
+                with smtplib.SMTP(host, port, timeout=10) as smtp:
+                    if use_tls:
+                        smtp.starttls()
+                    if username and password:
+                        smtp.login(username, password)
+                    smtp.send_message(message)
             app.logger.info("Email notification sent to %s", recipient)
             return True
         except Exception as exc:  # pragma: no cover - network dependent
