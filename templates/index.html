@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FollowUp Boss</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles_modern.css') }}">
+</head>
+<body>
+    <header class="app-header">
+        <div class="brand">
+            <span class="brand-mark">FB</span>
+            <div class="brand-copy">
+                <h1>FollowUp Boss</h1>
+                <p class="brand-tagline">Track follow-ups across calls, meetings, and email.</p>
+            </div>
+        </div>
+        <div class="header-stats">
+            <span class="counter-label">Follow-ups Due Today</span>
+            <span class="counter-value">{{ due_today_count }}</span>
+        </div>
+    </header>
+
+    <main class="layout">
+        {% set pending_count = pending_items|length %}
+        {% set snoozed_count = snoozed_items|length %}
+        {% set done_count = done_items|length %}
+        {% set total_count = pending_count + snoozed_count + done_count %}
+        {% set pending_percent = ((pending_count / total_count) * 100)|round(0) if total_count else 0 %}
+        {% set snoozed_percent = ((snoozed_count / total_count) * 100)|round(0) if total_count else 0 %}
+        {% set done_percent = ((done_count / total_count) * 100)|round(0) if total_count else 0 %}
+
+        <!-- Flash messages for form errors -->
+        {% with messages = get_flashed_messages() %}
+        {% if messages %}
+        <section class="flash">
+            {% for message in messages %}
+            <p>{{ message }}</p>
+            {% endfor %}
+        </section>
+        {% endif %}
+        {% endwith %}
+
+        <!-- ================================================================
+             ADD FOLLOW-UP FORM - Create new follow-ups
+             ================================================================ -->
+        <section class="card add-form">
+            <div class="add-form-header">
+                <div class="add-form-title">
+                    <span class="form-icon">&#10010;</span>
+                    <div>
+                        <h2>Add a Follow-Up</h2>
+                        <p>Capture next steps, set reminders, and keep your pipeline moving.</p>
+                    </div>
+                </div>
+                <span class="form-tip">All fields required unless marked optional</span>
+            </div>
+            <form method="post" action="{{ url_for('add_followup') }}" class="form-grid">
+                <label>
+                    <span class="field-label"><span class="label-icon">&#128214;</span> Source</span>
+                    <select name="source" required>
+                        <option value="">Select source</option>
+                        <option>WhatsApp</option>
+                        <option>Call</option>
+                        <option>Verbal</option>
+                        <option>Email</option>
+                        <option>Other</option>
+                    </select>
+                </label>
+                <label>
+                    <span class="field-label"><span class="label-icon">&#128100;</span> Who to follow up with</span>
+                    <input type="text" name="contact" placeholder="Client name or team" required>
+                </label>
+                <label class="full">
+                    <span class="field-label"><span class="label-icon">&#9998;</span> Follow-up description</span>
+                    <textarea name="description" rows="2" placeholder="e.g. Confirm proposal delivery" required></textarea>
+                </label>
+                <label>
+                    <span class="field-label"><span class="label-icon">&#128197;</span> Due Date</span>
+                    <input type="date" name="due_date" required>
+                </label>
+                <label>
+                    <span class="field-label"><span class="label-icon">&#9889;</span> Priority</span>
+                    <select name="priority" required>
+                        <option>Low</option>
+                        <option selected>Medium</option>
+                        <option>High</option>
+                    </select>
+                </label>
+                <label>
+                    <span class="field-label"><span class="label-icon">&#9201;</span> Status</span>
+                    <select name="status" required>
+                        <option selected>Pending</option>
+                        <option>Done</option>
+                        <option>Snoozed</option>
+                    </select>
+                </label>
+                <label>
+                    <span class="field-label"><span class="label-icon">&#128336;</span> Snoozed Till <span class="optional">(Optional)</span></span>
+                    <input type="date" name="snoozed_till">
+                </label>
+                <label>
+                    <span class="field-label"><span class="label-icon">&#9993;</span> Notify Email <span class="optional">(Optional)</span></span>
+                    <input type="email" name="notify_email" placeholder="ops@example.com">
+                </label>
+                <div class="actions">
+                    <button type="submit" class="btn-primary">Add Follow-Up</button>
+                </div>
+            </form>
+        </section>
+
+        <!-- ================================================================
+             KANBAN BOARD - Three columns: Pending, Snoozed, Done
+             ================================================================ -->
+        <section class="board">
+            <!-- PENDING COLUMN - Active follow-ups -->
+            <article class="column column-pending">
+                <header class="column-header">
+                    <div class="column-title">
+                        <span class="column-icon">&#9203;</span>
+                        <h2>Pending</h2>
+                    </div>
+                    <span class="column-count">{{ pending_count }}</span>
+                </header>
+                <div class="column-progress">
+                    <div class="column-progress-bar" data-progress="{{ pending_percent }}"></div>
+                </div>
+                {% if pending_items %}
+                {% for item in pending_items %}
+                <div class="card status-pending {% if item.is_overdue %}overdue{% endif %}" data-due="{{ item.due_date }}">
+                    <header>
+                        <span class="source">{{ item.source }}</span>
+                        <span class="priority {{ item.priority|lower }}">{{ item.priority }}</span>
+                    </header>
+                    <p class="contact">{{ item.contact }}</p>
+                    <p class="description">{{ item.description }}</p>
+                    <footer>
+                        <span class="due">Due {{ item.due_date.strftime('%b %d, %Y') }}
+                            {% if item.is_overdue %}
+                            <span class="chip chip-danger">Overdue</span>
+                            {% endif %}
+                        </span>
+                        <div class="card-actions">
+                            <button data-id="{{ item.id }}" onclick="editFollowup(this.dataset.id)" class="btn edit">Edit</button>
+                            <button data-id="{{ item.id }}" data-action="Done" class="btn">Mark Done</button>
+                            <button data-id="{{ item.id }}" data-action="Snoozed" class="btn secondary" {% if item.is_overdue %}disabled title="Update the due date before snoozing overdue follow-ups."{% endif %}>Snooze</button>
+                            <button data-id="{{ item.id }}" onclick="deleteFollowup(this.dataset.id)" class="btn danger">Delete</button>
+                        </div>
+                    </footer>
+                </div>
+                {% endfor %}
+                {% else %}
+                <p class="empty">No pending follow-ups. Great job!</p>
+                {% endif %}
+            </article>
+
+            <!-- SNOOZED COLUMN - Temporarily hidden follow-ups -->
+            <article class="column column-snoozed">
+                <header class="column-header">
+                    <div class="column-title">
+                        <span class="column-icon">&#128164;</span>
+                        <h2>Snoozed</h2>
+                    </div>
+                    <span class="column-count">{{ snoozed_count }}</span>
+                </header>
+                <div class="column-progress">
+                    <div class="column-progress-bar" data-progress="{{ snoozed_percent }}"></div>
+                </div>
+                {% if snoozed_items %}
+                {% for item in snoozed_items %}
+                <div class="card status-snoozed" data-due="{{ item.snoozed_till }}">
+                    <header>
+                        <span class="source">{{ item.source }}</span>
+                        <span class="priority {{ item.priority|lower }}">{{ item.priority }}</span>
+                    </header>
+                    <p class="contact">{{ item.contact }}</p>
+                    <p class="description">{{ item.description }}</p>
+                    <footer>
+                        <span class="due">Snoozed till {{ item.snoozed_till.strftime('%b %d, %Y') if item.snoozed_till else '—' }}</span>
+                        <div class="card-actions">
+                            <button data-id="{{ item.id }}" onclick="editFollowup(this.dataset.id)" class="btn edit">Edit</button>
+                            <button data-id="{{ item.id }}" data-action="Pending" class="btn">Back to Pending</button>
+                            <button data-id="{{ item.id }}" data-action="Done" class="btn secondary">Complete</button>
+                            <button data-id="{{ item.id }}" onclick="deleteFollowup(this.dataset.id)" class="btn danger">Delete</button>
+                        </div>
+                    </footer>
+                </div>
+                {% endfor %}
+                {% else %}
+                <p class="empty">Nothing snoozed.</p>
+                {% endif %}
+            </article>
+
+            <!-- DONE COLUMN - Completed follow-ups -->
+            <article class="column column-done">
+                <header class="column-header">
+                    <div class="column-title">
+                        <span class="column-icon">&#9989;</span>
+                        <h2>Done</h2>
+                    </div>
+                    <span class="column-count">{{ done_count }}</span>
+                </header>
+                <div class="column-progress">
+                    <div class="column-progress-bar" data-progress="{{ done_percent }}"></div>
+                </div>
+                {% if done_items %}
+                {% for item in done_items %}
+                <div class="card status-done">
+                    <header>
+                        <span class="source">{{ item.source }}</span>
+                        <span class="priority {{ item.priority|lower }}">{{ item.priority }}</span>
+                    </header>
+                    <p class="contact">{{ item.contact }}</p>
+                    <p class="description">{{ item.description }}</p>
+                    <footer>
+                        <span class="due">Completed {{ item.completed_at.strftime('%b %d, %Y %H:%M') if item.completed_at else '—' }}</span>
+                        <div class="card-actions">
+                            <button data-id="{{ item.id }}" onclick="deleteFollowup(this.dataset.id)" class="btn danger">Delete</button>
+                        </div>
+                    </footer>
+                </div>
+                {% endfor %}
+                {% else %}
+                <p class="empty">No completed follow-ups yet.</p>
+                {% endif %}
+            </article>
+        </section>
+    </main>
+
+    <!-- ====================================================================
+         EDIT MODAL - Edit existing follow-up details
+         ==================================================================== -->
+    <div id="editModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Edit Follow-up</h2>
+                <span class="close" onclick="closeModal('editModal')">&times;</span>
+            </div>
+            <form id="editForm">
+                <div class="modal-body">
+                    <input type="hidden" id="editId">
+                    <label>
+                        Source
+                        <select id="editSource" required>
+                            <option value="">Select source</option>
+                            <option>WhatsApp</option>
+                            <option>Call</option>
+                            <option>Verbal</option>
+                            <option>Email</option>
+                            <option>Other</option>
+                        </select>
+                    </label>
+                    <label>
+                        Who to follow up with
+                        <input type="text" id="editContact" placeholder="Client name or team" required>
+                    </label>
+                    <label>
+                        Follow-up description
+                        <textarea id="editDescription" rows="2" placeholder="e.g. Get client PO" required></textarea>
+                    </label>
+                    <label>
+                        Due Date
+                        <input type="date" id="editDueDate" required>
+                    </label>
+                    <label>
+                        Priority
+                        <select id="editPriority" required>
+                            <option>Low</option>
+                            <option>Medium</option>
+                            <option>High</option>
+                        </select>
+                    </label>
+                    <label>
+                        Notify Email
+                        <input type="email" id="editNotifyEmail" placeholder="ops@example.com">
+                    </label>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn secondary" onclick="closeModal('editModal')">Cancel</button>
+                    <button type="submit" class="btn primary">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- ====================================================================
+         DELETE MODAL - Confirm before deleting a follow-up
+         ==================================================================== -->
+    <div id="deleteModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Confirm Delete</h2>
+                <span class="close" onclick="closeModal('deleteModal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to delete this follow-up?</p>
+                <div class="alert-warning">
+                    <strong>Contact:</strong> <span id="deleteContact"></span><br>
+                    <strong>Description:</strong> <span id="deleteDescription"></span>
+                </div>
+                <p><em>This action cannot be undone.</em></p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn secondary" onclick="closeModal('deleteModal')">Cancel</button>
+                <button type="button" class="btn danger" id="confirmDelete">Delete Follow-up</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Load JavaScript for interactive features -->
+    <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+</body>
+</html>
