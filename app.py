@@ -1097,6 +1097,53 @@ def create_app(test_config: Optional[Dict[str, Any]] = None) -> Flask:
                 "success": False, 
                 "error": str(e)
             }), 500
+    
+    @app.route("/api/health", methods=["GET"])
+    def health_check():
+        """
+        Health check endpoint - shows database type, config status, and follow-up count.
+        Useful for debugging deployment issues.
+        """
+        try:
+            # Get database type
+            db_uri = app.config.get('SQLALCHEMY_DATABASE_URI', 'Not configured')
+            if 'postgresql' in db_uri:
+                db_type = "PostgreSQL ✅ (Persistent)"
+            elif 'sqlite' in db_uri:
+                db_type = "SQLite ⚠️ (Temporary - data will be lost!)"
+            else:
+                db_type = "Unknown"
+            
+            # Count follow-ups
+            total_followups = FollowUp.query.count()
+            pending_count = FollowUp.query.filter_by(status='Pending').count()
+            
+            # Check scheduler
+            scheduler_running = hasattr(app, 'scheduler') and app.scheduler.running
+            
+            return jsonify({
+                "status": "healthy",
+                "database": {
+                    "type": db_type,
+                    "uri_prefix": db_uri.split('@')[0].split('://')[0] if '://' in db_uri else 'unknown'
+                },
+                "data": {
+                    "total_followups": total_followups,
+                    "pending_followups": pending_count
+                },
+                "scheduler": {
+                    "running": scheduler_running
+                },
+                "config": {
+                    "smtp_configured": bool(app.config.get('SMTP_USERNAME')),
+                    "secret_key_set": app.config.get('SECRET_KEY') != 'followup-boss-secret-change-in-production'
+                }
+            })
+        except Exception as e:
+            return jsonify({
+                "status": "error",
+                "error": str(e)
+            }), 500
 
     # =========================================================================
     # ERROR HANDLERS - Handle 404, 405, and 500 errors with JSON for API calls
