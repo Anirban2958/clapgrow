@@ -775,6 +775,11 @@ def create_app(test_config: Optional[Dict[str, Any]] = None) -> Flask:
         Start the background scheduler that runs automation cycles periodically.
         The scheduler runs every 15 minutes by default.
         """
+        # Prevent multiple scheduler instances in multi-worker environments
+        if hasattr(app, 'scheduler') and app.scheduler.running:
+            app.logger.info("Scheduler already running, skipping initialization")
+            return
+            
         scheduler = BackgroundScheduler(daemon=True)
 
         def job_wrapper() -> None:
@@ -785,6 +790,15 @@ def create_app(test_config: Optional[Dict[str, Any]] = None) -> Flask:
         # Schedule the automation job
         interval_minutes = int(app.config.get("AUTOMATION_INTERVAL_MINUTES", 15))
         scheduler.add_job(job_wrapper, "interval", minutes=interval_minutes, id="followup-automation")
+        
+        # Run once immediately on startup
+        try:
+            with app.app_context():
+                app.logger.info("Running initial automation cycle on startup...")
+                process_automation_cycle()
+        except Exception as e:
+            app.logger.error(f"Error in initial automation cycle: {e}")
+        
         scheduler.start()
         app.logger.info("Automation scheduler started (interval=%s minutes)", interval_minutes)
         setattr(app, "scheduler", scheduler)
@@ -1059,6 +1073,30 @@ def create_app(test_config: Optional[Dict[str, Any]] = None) -> Flask:
         except Exception as e:
             db.session.rollback()
             return jsonify({"success": False, "error": str(e)}), 500
+
+    # =========================================================================
+    # ADMIN/TEST ENDPOINTS - Trigger notifications manually for testing
+    # =========================================================================
+    
+    @app.route("/api/trigger-notifications", methods=["POST"])
+    def trigger_notifications():
+        """
+        Manually trigger the notification cycle (useful for testing).
+        This endpoint runs the automation cycle immediately.
+        """
+        try:
+            app.logger.info("Manual notification trigger requested")
+            process_automation_cycle()
+            return jsonify({
+                "success": True, 
+                "message": "Notification cycle completed successfully"
+            })
+        except Exception as e:
+            app.logger.error(f"Error in manual notification trigger: {e}")
+            return jsonify({
+                "success": False, 
+                "error": str(e)
+            }), 500
 
     # =========================================================================
     # ERROR HANDLERS - Handle 404, 405, and 500 errors with JSON for API calls
