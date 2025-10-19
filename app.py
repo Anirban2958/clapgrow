@@ -8,7 +8,6 @@ from datetime import date, datetime, timedelta, timezone
 # Email functionality
 from email.message import EmailMessage
 import smtplib
-import resend
 
 # File system operations
 from pathlib import Path
@@ -87,11 +86,7 @@ def create_app(test_config: Optional[Dict[str, Any]] = None) -> Flask:
     app.config.setdefault("AUTOMATION_LOOKAHEAD_DAYS", 3)  # How many days ahead to check for due items
     app.config.setdefault("AUTOMATION_INTERVAL_MINUTES", 15)  # How often to run automation (in minutes)
     
-    # Email Configuration - Resend API (primary) with SMTP fallback
-    app.config.setdefault("RESEND_API_KEY", os.getenv("RESEND_API_KEY", ""))
-    app.config.setdefault("EMAIL_FROM", os.getenv("EMAIL_FROM", "project14281428@gmail.com"))
-    
-    # SMTP Configuration for Email Notifications (fallback only)
+    # SMTP Configuration for Email Notifications (Gmail by default)
     app.config.setdefault("SMTP_HOST", os.getenv("SMTP_HOST", "smtp.gmail.com"))
     app.config.setdefault("SMTP_PORT", int(os.getenv("SMTP_PORT", "587")))
     app.config.setdefault("SMTP_USERNAME", os.getenv("SMTP_USERNAME", "your-email@gmail.com"))
@@ -544,12 +539,13 @@ def create_app(test_config: Optional[Dict[str, Any]] = None) -> Flask:
 
     def send_email_notification(recipient: str, subject: str, body: str) -> bool:
         """
-        Send an email notification using Resend API (primary) or SMTP (fallback).
+        Send an email notification using SMTP (Gmail by default).
+        Supports both TLS (port 587) and SSL (port 465).
         
         Args:
             recipient: Email address to send to
             subject: Email subject line
-            body: Email message content (plain text)
+            body: Email message content
             
         Returns:
             True if sent successfully, False otherwise
@@ -558,42 +554,10 @@ def create_app(test_config: Optional[Dict[str, Any]] = None) -> Flask:
             app.logger.debug("Dry run: skipping email send to %s", recipient)
             return True
 
-        # Get sender email (fixed to project14281428@gmail.com)
-        sender = app.config.get("EMAIL_FROM", "project14281428@gmail.com")
-        
-        # Try Resend API first
-        resend_api_key = app.config.get("RESEND_API_KEY")
-        if resend_api_key and resend_api_key.strip():
-            try:
-                resend.api_key = resend_api_key
-                
-                # Convert plain text body to HTML for better formatting
-                html_body = body.replace('\n', '<br>')
-                
-                # Use Resend's verified domain (onboarding@resend.dev)
-                # Custom domains require verification at https://resend.com/domains
-                resend_from = "FollowUp Boss <onboarding@resend.dev>"
-                
-                result = resend.Emails.send({
-                    "from": resend_from,
-                    "to": recipient,
-                    "subject": subject,
-                    "html": f"<div style='font-family: Arial, sans-serif;'>{html_body}</div>",
-                    "reply_to": sender  # User can reply to your Gmail
-                })
-                
-                app.logger.info("Email sent via Resend API to %s (ID: %s)", recipient, result.get('id', 'unknown'))
-                return True
-                
-            except Exception as exc:
-                app.logger.warning("Resend API failed for %s: %s. Trying SMTP fallback...", recipient, exc)
-        
-        # Fallback to SMTP if Resend fails or not configured
         host = app.config.get("SMTP_HOST")
-        smtp_sender = app.config.get("SMTP_FROM_EMAIL", sender)
-        
-        if not host:
-            app.logger.debug("No email service configured (Resend or SMTP); email suppressed")
+        sender = app.config.get("SMTP_FROM_EMAIL")
+        if not host or not sender:
+            app.logger.debug("SMTP configuration incomplete; email suppressed")
             return False
 
         port = int(app.config.get("SMTP_PORT", 587) or 587)
@@ -603,7 +567,7 @@ def create_app(test_config: Optional[Dict[str, Any]] = None) -> Flask:
         use_ssl = bool(app.config.get("SMTP_USE_SSL", False))
 
         message = EmailMessage()
-        message["From"] = smtp_sender
+        message["From"] = sender
         message["To"] = recipient
         message["Subject"] = subject
         message.set_content(body)
@@ -622,10 +586,10 @@ def create_app(test_config: Optional[Dict[str, Any]] = None) -> Flask:
                     if username and password:
                         smtp.login(username, password)
                     smtp.send_message(message)
-            app.logger.info("Email notification sent via SMTP to %s", recipient)
+            app.logger.info("Email notification sent to %s", recipient)
             return True
         except Exception as exc:  # pragma: no cover - network dependent
-            app.logger.warning("SMTP send failed for %s: %s", recipient, exc)
+            app.logger.warning("Email send failed for %s: %s", recipient, exc)
             return False
 
     # WhatsApp functionality removed - email only
@@ -1181,9 +1145,7 @@ def create_app(test_config: Optional[Dict[str, Any]] = None) -> Flask:
                     "running": scheduler_running
                 },
                 "config": {
-                    "resend_configured": bool(app.config.get('RESEND_API_KEY')),
                     "smtp_configured": bool(app.config.get('SMTP_USERNAME')),
-                    "email_from": app.config.get('EMAIL_FROM', 'Not set'),
                     "secret_key_set": app.config.get('SECRET_KEY') != 'followup-boss-secret-change-in-production'
                 }
             })
